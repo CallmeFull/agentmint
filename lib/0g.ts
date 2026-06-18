@@ -34,7 +34,7 @@ export interface UploadResult {
 export interface ChatResult {
   reply: string;
   model: string;
-  provider: "0g-compute" | "local-fallback";
+  provider: string; // "0g-compute" or "local-fallback" or "0g-compute (<provider-host>)"
   usage?: any;
 }
 
@@ -362,12 +362,52 @@ export async function fetchPersonality(rootHash: string): Promise<PersonalityDat
   }
 }
 
+// Default chatbot provider on 0G Compute testnet (qwen2.5-omni-7b, OpenAI-compatible).
+// Keep in sync with scripts/compute_test.js.
+const COMPUTE_CHATBOT_PROVIDER =
+  process.env.OG_COMPUTE_CHATBOT_PROVIDER ||
+  "0xa48f01287233509FD694a22Bf840225062E67836";
+
 export async function chatWithAgent(
   personality: PersonalityData,
   history: ChatMessage[],
   model: string = DEFAULT_MODEL,
 ): Promise<ChatResult> {
-  const client = getOpenAIClient();
+  // Use the real 0G Compute broker when PRIVATE_KEY is set (server-side).
+  // Falls back to a local in-character reply if the broker is unavailable.
+  if (PRIVATE_KEY) {
+    try {
+      const result = await realComputeChat(personality, history, model);
+      return result;
+    } catch (e: any) {
+      console.warn(`[chatWithAgent] 0G Compute failed (${e.message?.slice(0, 200)}), using local fallback`);
+    }
+  }
+  return localChatFallback(personality, history);
+}
+
+async function realComputeChat(
+  personality: PersonalityData,
+  history: ChatMessage[],
+  model: string,
+): Promise<ChatResult> {
+  const { createZGComputeNetworkBroker } = await import("@0glabs/0g-serving-broker");
+  const provider = new ethers.JsonRpcProvider(RPC_URL, 16602);
+  const wallet = new ethers.Wallet(PRIVATE_KEY!, provider);
+  const broker = await createZGComputeNetworkBroker(wallet);
+
+  // Discover service metadata (endpoint + model)
+  const meta = await broker.inference.getServiceMetadata(
+    COMPUTE_CHATBOT_PROVIDER,
+    "chatbot",
+  );
+  const realModel = meta?.model || model;
+
+  // Mint a fresh bearer header (bypasses getRequestHeaders' topUp wrapper
+  // which requires ENS — unsupported on 0G testnet).
+  const authHeader = await broker.inference.requestProcessor.getHeader(
+    COMPUTE_CHATBOT_PROVIDER,
+  );
 
   const messages: ChatMessage[] = [
     {
@@ -377,24 +417,53 @@ export async function chatWithAgent(
     ...history,
   ];
 
-  try {
-    const completion = await client.chat.completions.create({
-      model,
-      temperature: 0.85,
-      max_tokens: 600,
-      messages: messages as any,
-    });
-    const reply = completion.choices?.[0]?.message?.content || "(no reply)";
-    return {
-      reply,
-      model: completion.model || model,
-      provider: "0g-compute",
-      usage: completion.usage,
-    };
-  } catch (e: any) {
-    console.warn(`[chatWithAgent] 0G Compute failed (${e.message}), using local fallback`);
-    return localChatFallback(personality, history);
+  const body = {
+    model: realModel,
+    messages: messages as any,
+    temperature: 0.85,
+    max_tokens: 600,
+  };
+
+  const res = await fetch(`${meta.endpoint}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeader },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    const msg = data?.error?.message || data?.error || `HTTP ${res.status}`;
+    throw new Error(`0G Compute chat error: ${msg}`);
   }
+  const reply = data?.choices?.[0]?.message?.content || "(no reply)";
+  const chatID =
+    res.headers.get("ZG-Res-Key") || data?.id || "";
+
+  // Settle payment (non-fatal if it fails — the inference already happened)
+  try {
+    if (chatID) {
+      await broker.inference.responseProcessor.processResponse(
+        COMPUTE_CHATBOT_PROVIDER,
+        chatID,
+        body,
+      );
+    }
+  } catch (e: any) {
+    console.warn(`[chatWithAgent] settle non-fatal: ${e.message?.slice(0, 200)}`);
+  }
+
+  return {
+    reply,
+    model: data?.model || realModel,
+    provider: `0g-compute (${meta.endpoint.replace(/^https?:\/\//, "").split("/")[0]})`,
+    usage: data?.usage
+      ? {
+          prompt_tokens: data.usage.prompt_tokens,
+          completion_tokens: data.usage.completion_tokens,
+          total_tokens: data.usage.total_tokens,
+        }
+      : undefined,
+  };
 }
 
 export interface AgentSummary {

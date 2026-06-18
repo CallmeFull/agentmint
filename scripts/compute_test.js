@@ -1,4 +1,4 @@
-// Test 0G Compute chat with getHeader (skip topUp).
+// Working 0G Compute chat pattern.
 const { ethers } = require('ethers');
 const { createZGComputeNetworkBroker } = require('@0glabs/0g-serving-broker');
 require('dotenv').config();
@@ -7,60 +7,54 @@ require('dotenv').config();
   const provider = new ethers.JsonRpcProvider(process.env.OG_RPC, 16602);
   const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
   const broker = await createZGComputeNetworkBroker(wallet);
-
   const PROVIDER = '0xa48f01287233509FD694a22Bf840225062E67836';
 
-  // Get service metadata
   const meta = await broker.inference.getServiceMetadata(PROVIDER, 'chatbot');
-  console.log('Endpoint:', meta.endpoint);
-  console.log('Model:', meta.model);
+  console.log('Endpoint:', meta.endpoint, '| Model:', meta.model);
 
-  // Get auth header directly (skip topUp that needs ENS)
-  console.log('\n--- Creating auth header (getHeader) ---');
-  try {
-    const headers = await broker.inference.requestProcessor.getHeader(PROVIDER);
-    console.log('Got headers. Sending chat...');
+  // Get auth header
+  const authHeader = await broker.inference.requestProcessor.getHeader(PROVIDER);
+  console.log('Got auth header');
 
-    const body = {
-      model: meta.model,
-      messages: [
-        { role: 'system', content: 'You are a witty pirate captain. Reply briefly.' },
-        { role: 'user', content: 'Who are you?' },
-      ],
-      max_tokens: 80,
-    };
+  // System prompt for the test agent
+  const systemPrompt = 'You are a witty pirate captain. Reply briefly.';
+  const userMsg = 'Who are you?';
+  const body = {
+    model: meta.model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMsg },
+    ],
+    max_tokens: 100,
+  };
 
-    const res = await fetch(`${meta.endpoint}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-    });
-    console.log('HTTP status:', res.status);
-    const data = await res.json();
-    console.log('Body:', JSON.stringify(data, null, 2).slice(0, 600));
+  console.log('\nSending chat...');
+  const res = await fetch(`${meta.endpoint}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  console.log('HTTP:', res.status);
 
-    if (res.ok && data.choices?.[0]) {
-      const reply = data.choices[0].message.content;
-      console.log('\n💬 Reply:', reply);
+  if (res.ok && data.choices?.[0]) {
+    const reply = data.choices[0].message.content;
+    console.log('\n💬 Reply:', reply);
+    console.log('Usage:', data.usage);
 
-      // Process response to settle payment
-      console.log('\n--- Settle payment ---');
-      const chatID = res.headers.get('ZG-Res-Key') || data.id;
-      try {
-        const isVerifiable = await broker.inference.verifier.isVerifiable(PROVIDER, 'chatbot');
-        if (isVerifiable) {
-          await broker.inference.processResponse(PROVIDER, chatID, body);
-        } else {
-          await broker.inference.processResponse(PROVIDER, chatID, body);
-        }
-        console.log('✅ Settled');
-      } catch (e) {
-        console.log('Settle err (may not be fatal):', e.message);
-      }
-    } else {
-      console.log('\n❌ Request failed');
+    // Settle payment
+    const chatID = res.headers.get('ZG-Res-Key') || data.id;
+    console.log('Chat ID:', chatID);
+
+    try {
+      const settlement = await broker.inference.responseProcessor.processResponse(
+        PROVIDER, chatID, body
+      );
+      console.log('Settlement result:', settlement);
+    } catch (e) {
+      console.log('Settle non-fatal:', e.message?.slice(0, 200));
     }
-  } catch (e) {
-    console.log('ERR:', e.message);
+  } else {
+    console.log('Body:', JSON.stringify(data, null, 2).slice(0, 500));
   }
-})().catch(console.error);
+})().catch(e => { console.error('ERR:', e.message); process.exit(1); });
