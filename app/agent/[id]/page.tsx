@@ -6,7 +6,7 @@ import Link from "next/link";
 import { ethers } from "ethers";
 import { useWallet } from "@/app/providers";
 import { AGENTMINT_ABI } from "@/lib/abis";
-import { AGENTMINT_ADDRESS, MINT_PRICE } from "@/lib/contract";
+import { AGENTMINT_ADDRESS, RARITY_TIERS, RARITY_COLORS, MOOD_LABELS } from "@/lib/contract";
 
 interface Personality {
   name: string;
@@ -25,11 +25,39 @@ interface AgentData {
   tokenURI: string;
   personalityHash: string;
   summonCount: number;
+  level: number;
+  milestoneName: string;
+  milestoneAbility: string;
+  score: number;
+  rarity: number;
+  mood: number;
+  birthBlock: number;
 }
 
 interface ChatTurn {
   role: "user" | "assistant" | "system";
   content: string;
+}
+
+interface Milestone {
+  chatsRequired: number;
+  name: string;
+  ability: string;
+}
+
+const MS_DEFS = [
+  { chatsRequired: 0,   name: "Initiate", ability: "speaks plainly" },
+  { chatsRequired: 5,   name: "Curious",  ability: "asks deeper questions" },
+  { chatsRequired: 15,  name: "Wise",     ability: "offers unexpected insights" },
+  { chatsRequired: 40,  name: "Ancient",  ability: "references shared memory" },
+  { chatsRequired: 100, name: "Mythic",   ability: "speaks in riddles and prophecy" },
+];
+
+function nextMilestone(chats: number): Milestone | null {
+  for (const m of MS_DEFS) {
+    if (m.chatsRequired > chats) return m;
+  }
+  return null;
 }
 
 export default function AgentDetailPage() {
@@ -50,10 +78,20 @@ export default function AgentDetailPage() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [summonBusy, setSummonBusy] = useState(false);
   const [summonTx, setSummonTx] = useState<string | null>(null);
+  const [voteBusy, setVoteBusy] = useState<null | "up" | "down">(null);
+  const [voteTx, setVoteTx] = useState<string | null>(null);
+  const [levelUpToast, setLevelUpToast] = useState<string | null>(null);
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // Load agent + personality
+  // Auto-scroll chat
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chat]);
+
+  // Initial load
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -64,7 +102,6 @@ export default function AgentDetailPage() {
       setPersonality(null);
       setChat([]);
       try {
-        // 1. Get agent data from chain
         const aRes = await fetch(`/api/agent/${id}`);
         const aData = await aRes.json();
         if (!aRes.ok) throw new Error(aData.error || "Failed to load agent");
@@ -72,40 +109,21 @@ export default function AgentDetailPage() {
         setAgent(aData.agent);
         if (aData.contractName) setContractName(aData.contractName);
 
-        // 2. Fetch personality from 0G Storage via API
-        const pRes = await fetch(`/api/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            rootHash: aData.agent.personalityHash,
-            history: [],
-          }),
-        });
-        // That call also fetches personality for the chat — but we want to display it first.
-        // Let's fetch the personality via a dedicated approach: chat endpoint returns a reply;
-        // for display-only, we hit a small endpoint that returns personality only.
         const ppRes = await fetch(
           `/api/personality?rootHash=${encodeURIComponent(aData.agent.personalityHash)}`,
         );
+        let pp: Personality | null = null;
         if (ppRes.ok) {
           const ppData = await ppRes.json();
-          if (!cancelled) setPersonality(ppData.personality);
+          pp = ppData.personality;
+          if (!cancelled) setPersonality(pp);
         }
 
-        // 3. Initial greeting
-        setChat([
-          {
-            role: "assistant",
-            content:
-              ppRes.ok && personality
-                ? (personality as Personality).greeting
-                : aData.agent.personalityHash
-                  ? "Hello. (Personality metadata still loading…)"
-                  : "Hello.",
-          },
-        ]);
+        // Initial greeting
+        const greet = pp?.greeting || "Greetings, traveler.";
+        setChat([{ role: "assistant", content: greet }]);
       } catch (e: any) {
-        if (!cancelled) setLoadError(e.message);
+        if (!cancelled) setLoadError(e.message || "Load failed");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -113,21 +131,23 @@ export default function AgentDetailPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  useEffect(() => {
-    if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+  async function refreshAgentData() {
+    try {
+      const aRes = await fetch(`/api/agent/${id}`);
+      const aData = await aRes.json();
+      if (aRes.ok) setAgent(aData.agent);
+    } catch {
+      /* ignore */
     }
-  }, [chat, chatBusy]);
+  }
 
-  async function sendChat() {
-    if (!chatInput.trim() || !personality) return;
-    const userMsg: ChatTurn = { role: "user", content: chatInput.trim() };
-    const newHistory = chat.filter((c) => c.role !== "system").concat(userMsg);
-    setChat((c) => [...c, userMsg]);
+  async function handleChat() {
+    if (!chatInput.trim() || !agent) return;
+    const userMsg = chatInput.trim();
     setChatInput("");
+    setChat((c) => [...c, { role: "user", content: userMsg }]);
     setChatBusy(true);
     setChatError(null);
     try {
@@ -135,274 +155,422 @@ export default function AgentDetailPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          rootHash: agent?.personalityHash,
-          history: newHistory,
+          rootHash: agent.personalityHash,
+          history: chat.concat({ role: "user", content: userMsg }),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Chat failed");
       setChat((c) => [...c, { role: "assistant", content: data.reply }]);
+      // Refresh on-chain data — chat may have triggered a level up
+      refreshAgentData();
     } catch (e: any) {
-      setChatError(e.message);
-      setChat((c) => [...c, { role: "system", content: `Error: ${e.message}` }]);
+      setChatError(e.message || "Chat error");
     } finally {
       setChatBusy(false);
     }
   }
 
-  async function recordSummon() {
+  async function handleSummon() {
     if (!wallet.address) {
-      setChatError("Connect wallet to record summon on-chain");
+      alert("Connect wallet first");
       return;
     }
     setSummonBusy(true);
-    setChatError(null);
+    setSummonTx(null);
     try {
       const chainOk = await wallet.ensureCorrectChain();
       if (!chainOk) throw new Error("Could not switch to 0G Galileo testnet");
       const signer = await wallet.getSigner();
-      if (!signer) throw new Error("No signer");
+      if (!signer) throw new Error("No signer available");
+
       const c = new ethers.Contract(AGENTMINT_ADDRESS, AGENTMINT_ABI as any, signer);
       const tx = await c.recordSummon(id);
       setSummonTx(tx.hash);
-      await tx.wait();
-      // Refresh summon count
-      const aRes = await fetch(`/api/agent/${id}`);
-      if (aRes.ok) {
-        const aData = await aRes.json();
-        setAgent(aData.agent);
+      const receipt = await tx.wait();
+
+      // Check for level up
+      const iface = c.interface;
+      for (const lg of receipt.logs) {
+        try {
+          const parsed = iface.parseLog(lg);
+          if (parsed?.name === "AgentLeveledUp") {
+            setLevelUpToast(
+              `🎉 ${personality?.name || "Agent"} reached Level ${parsed.args.newLevel}! (${parsed.args.milestone})`,
+            );
+            setTimeout(() => setLevelUpToast(null), 6000);
+            break;
+          }
+        } catch {
+          /* not our log */
+        }
       }
+      refreshAgentData();
     } catch (e: any) {
-      setChatError(e.shortMessage || e.message);
+      alert(`Summon failed: ${e.shortMessage || e.message}`);
     } finally {
       setSummonBusy(false);
     }
   }
 
+  async function handleVote(positive: boolean) {
+    if (!wallet.address) {
+      alert("Connect wallet first");
+      return;
+    }
+    setVoteBusy(positive ? "up" : "down");
+    setVoteTx(null);
+    try {
+      const chainOk = await wallet.ensureCorrectChain();
+      if (!chainOk) throw new Error("Could not switch to 0G Galileo testnet");
+      const signer = await wallet.getSigner();
+      if (!signer) throw new Error("No signer available");
+
+      const c = new ethers.Contract(AGENTMINT_ADDRESS, AGENTMINT_ABI as any, signer);
+      const tx = await c.vote(id, positive);
+      setVoteTx(tx.hash);
+      await tx.wait();
+      refreshAgentData();
+    } catch (e: any) {
+      alert(`Vote failed: ${e.shortMessage || e.message}`);
+    } finally {
+      setVoteBusy(null);
+    }
+  }
+
   if (loading) {
     return (
-      <div className="card">
-        <div className="row">
-          <span className="spinner" />
-          <span className="muted">Loading iNFT #{id} from 0G…</span>
-        </div>
+      <div className="stack">
+        <div className="card">Loading iNFT #{id}…</div>
       </div>
     );
   }
-
-  if (loadError || !agent) {
+  if (loadError) {
     return (
-      <div className="card glow">
-        <div className="card-title">Error</div>
-        <p>{loadError || "Agent not found"}</p>
-        <div className="row mt-16">
-          <button onClick={() => router.push("/explore")}>← back to explore</button>
-        </div>
+      <div className="stack">
+        <div className="card error">Error: {loadError}</div>
+        <Link href="/">← back home</Link>
       </div>
     );
   }
+  if (!agent) return null;
 
-  const ownerIsMe =
-    wallet.address && agent.owner.toLowerCase() === wallet.address.toLowerCase();
+  const next = nextMilestone(agent.summonCount);
+  const progressToNext = next
+    ? Math.min(100, (agent.summonCount / next.chatsRequired) * 100)
+    : 100;
+  const rarityColor = RARITY_COLORS[agent.rarity] || "#888";
+  const rarityName = RARITY_TIERS[agent.rarity] || "Common";
+  const moodLabel = MOOD_LABELS[agent.mood] || "Neutral";
 
   return (
     <div className="stack-lg">
-      <div className="row-between">
-        <div>
-          <Link href="/explore" className="dim">
-            ← explore
-          </Link>
-          <h1 className="h2" style={{ marginTop: 8 }}>
+      <header className="hero">
+        <div className="row" style={{ alignItems: "baseline" }}>
+          <h1 className="h1" style={{ marginBottom: 0 }}>
             {personality?.name || `iNFT #${id}`}
-            <span className="muted" style={{ fontWeight: 400, marginLeft: 8, fontSize: 16 }}>
-              #{id}
-            </span>
           </h1>
-          {personality?.description && (
-            <p className="muted" style={{ maxWidth: 720 }}>
-              {personality.description}
-            </p>
-          )}
+          <span
+            className="pill"
+            style={{
+              background: rarityColor,
+              color: "#000",
+              fontWeight: 700,
+              fontSize: 12,
+              letterSpacing: 0.5,
+            }}
+          >
+            {rarityName}
+          </span>
         </div>
-        <div className="row" style={{ flexShrink: 0 }}>
-          <span className="pill accent">iNFT</span>
-          {personality?.traits?.slice(0, 3).map((t, i) => (
-            <span key={i} className="pill">
-              {t}
-            </span>
-          ))}
+        <p className="lede" style={{ marginTop: 8 }}>
+          {personality?.description ||
+            "A minted AI agent on 0G. Chat to evolve its level and milestone."}
+        </p>
+      </header>
+
+      {levelUpToast && (
+        <div
+          className="card glow"
+          style={{ borderColor: "var(--accent)", background: "rgba(250, 204, 21, 0.08)" }}
+        >
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--accent)" }}>
+            {levelUpToast}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="two-col">
         <div className="stack">
-          <div className="card">
-            <div className="card-title">On-chain metadata</div>
-            <div className="stack-sm">
-              <KV k="Contract" v={
-                <a
-                  href={`https://chainscan-galileo.0g.ai/address/${AGENTMINT_ADDRESS}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mono-addr"
-                >
-                  {AGENTMINT_ADDRESS}
-                </a>
-              } />
-              <KV k="Collection" v={`${contractName}`} />
-              <KV k="Token ID" v={`#${id}`} />
-              <KV k="Creator" v={
-                <a
-                  href={`https://chainscan-galileo.0g.ai/address/${agent.creator}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mono-addr"
-                >
-                  {agent.creator}
-                </a>
-              } />
-              <KV k="Owner" v={
-                <span>
-                  <a
-                    href={`https://chainscan-galileo.0g.ai/address/${agent.owner}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mono-addr"
-                  >
-                    {agent.owner}
-                  </a>
-                  {ownerIsMe && <span className="pill accent" style={{ marginLeft: 8 }}>you</span>}
-                </span>
-              } />
-              <KV k="Personality Hash" v={
-                <span className="mono-addr" title={agent.personalityHash}>
-                  {agent.personalityHash.slice(0, 22)}…{agent.personalityHash.slice(-8)}
-                </span>
-              } />
-              <KV k="tokenURI" v={
-                <span className="mono-addr" title={agent.tokenURI}>
-                  {agent.tokenURI}
-                </span>
-              } />
-              <KV k="Summon Count" v={`${agent.summonCount}×`} />
+          {/* Evolution card */}
+          <div className="card glow">
+            <div className="card-title">Evolution</div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                gap: 12,
+                marginBottom: 12,
+              }}
+            >
+              <Stat label="Level" value={agent.level.toString()} accent />
+              <Stat label="Chats" value={agent.summonCount.toString()} />
+              <Stat
+                label="Milestone"
+                value={agent.milestoneName}
+                accent2
+              />
+              <Stat label="Score" value={agent.score > 0 ? `+${agent.score}` : `${agent.score}`} />
             </div>
-            <div className="row mt-16">
+
+            {/* XP bar */}
+            <div style={{ marginTop: 4 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11,
+                  color: "var(--fg-dim)",
+                  marginBottom: 4,
+                }}
+              >
+                <span>
+                  {next
+                    ? `${agent.summonCount} / ${next.chatsRequired} chats to ${next.name}`
+                    : "Mythic — max milestone reached"}
+                </span>
+                <span>{Math.floor(progressToNext)}%</span>
+              </div>
+              <div
+                style={{
+                  height: 8,
+                  background: "var(--bg-elev)",
+                  borderRadius: 4,
+                  overflow: "hidden",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${progressToNext}%`,
+                    background: "linear-gradient(90deg, var(--accent), #fb7185)",
+                    transition: "width 0.4s ease",
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Milestone ability */}
+            <div
+              style={{
+                marginTop: 14,
+                padding: 10,
+                background: "var(--bg-elev)",
+                borderRadius: 6,
+                fontSize: 12,
+                color: "var(--fg-dim)",
+              }}
+            >
+              <span style={{ color: "var(--accent)" }}>✦ {agent.milestoneName}:</span>{" "}
+              {agent.milestoneAbility}
+            </div>
+
+            {/* Actions */}
+            <div className="row mt-16" style={{ flexWrap: "wrap" }}>
               <button
                 className="primary"
-                onClick={recordSummon}
+                onClick={handleSummon}
                 disabled={summonBusy || !wallet.address}
               >
-                {summonBusy ? (
-                  <>
-                    <span className="spinner" /> recording…
-                  </>
-                ) : (
-                  "Record Summon (on-chain)"
-                )}
+                {summonBusy ? <><span className="spinner" /> Summoning…</> : "↑ Record Summon (+1 chat)"}
               </button>
-              {summonTx && (
+              <button
+                className="ghost"
+                onClick={() => handleVote(true)}
+                disabled={voteBusy !== null || !wallet.address}
+                title="Upvote"
+              >
+                {voteBusy === "up" ? <span className="spinner" /> : "👍"}
+              </button>
+              <button
+                className="ghost"
+                onClick={() => handleVote(false)}
+                disabled={voteBusy !== null || !wallet.address}
+                title="Downvote"
+              >
+                {voteBusy === "down" ? <span className="spinner" /> : "👎"}
+              </button>
+            </div>
+            {summonTx && (
+              <div style={{ fontSize: 11, color: "var(--fg-dim)", marginTop: 8 }}>
+                Summon tx:{" "}
                 <a
-                  className="mono-addr"
                   href={`https://chainscan-galileo.0g.ai/tx/${summonTx}`}
                   target="_blank"
                   rel="noreferrer"
+                  className="mono-addr"
                 >
-                  tx: {summonTx.slice(0, 12)}…
+                  {summonTx.slice(0, 18)}…
                 </a>
-              )}
-            </div>
+              </div>
+            )}
+            {voteTx && (
+              <div style={{ fontSize: 11, color: "var(--fg-dim)", marginTop: 4 }}>
+                Vote tx:{" "}
+                <a
+                  href={`https://chainscan-galileo.0g.ai/tx/${voteTx}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mono-addr"
+                >
+                  {voteTx.slice(0, 18)}…
+                </a>
+              </div>
+            )}
           </div>
 
+          {/* Personality */}
           {personality && (
             <div className="card">
-              <div className="card-title">Personality (from 0G Storage)</div>
-              <div className="personality-preview">
-                {personality.voice && (
-                  <div className="field">
-                    <div className="field-label">Voice</div>
-                    <div className="field-value">{personality.voice}</div>
-                  </div>
-                )}
-                <div className="field">
-                  <div className="field-label">System prompt</div>
-                  <div
-                    className="field-value"
-                    style={{ fontSize: 13, maxHeight: 180, overflow: "auto" }}
-                  >
-                    {personality.systemPrompt}
-                  </div>
+              <div className="card-title">Personality</div>
+              <div className="field">
+                <div className="field-label">Traits</div>
+                <div className="traits">
+                  {personality.traits?.map((t, i) => (
+                    <span key={i} className="pill accent">
+                      {t}
+                    </span>
+                  ))}
                 </div>
-                {personality.avatarPrompt && (
-                  <div className="field">
-                    <div className="field-label">Avatar prompt</div>
-                    <div className="field-value dim">{personality.avatarPrompt}</div>
-                  </div>
-                )}
+              </div>
+              <div className="field">
+                <div className="field-label">Voice</div>
+                <div className="field-value">{personality.voice}</div>
+              </div>
+              <div className="field">
+                <div className="field-label">System prompt</div>
+                <div
+                  className="field-value"
+                  style={{ fontSize: 12, maxHeight: 140, overflow: "auto" }}
+                >
+                  {personality.systemPrompt}
+                </div>
               </div>
             </div>
           )}
         </div>
 
         <div className="stack">
-          <div className="card glow">
+          {/* Chat */}
+          <div className="card" style={{ minHeight: 480 }}>
             <div className="card-title">
-              Chat with iNFT #{id}
-              <span className="dim" style={{ marginLeft: 8, textTransform: "none", letterSpacing: 0 }}>
-                · powered by 0G Compute
+              Chat{" "}
+              <span
+                style={{ fontSize: 11, color: "var(--fg-dim)", fontWeight: 400, marginLeft: 6 }}
+              >
+                (mood: {moodLabel})
               </span>
             </div>
-
-            <div className="chat-window" ref={chatScrollRef}>
-              {chat.length === 0 && (
-                <div className="chat-msg system">
-                  Start a conversation. The agent uses its personality as the system prompt.
-                </div>
-              )}
-              {chat.map((m, i) => (
-                <div key={i} className={`chat-msg ${m.role}`}>
-                  {m.content}
+            <div
+              ref={chatScrollRef}
+              style={{
+                height: 360,
+                overflowY: "auto",
+                background: "var(--bg-elev)",
+                borderRadius: 6,
+                padding: 12,
+                fontSize: 13,
+                lineHeight: 1.6,
+              }}
+            >
+              {chat.map((turn, i) => (
+                <div
+                  key={i}
+                  style={{
+                    marginBottom: 10,
+                    color:
+                      turn.role === "user" ? "var(--accent)" : "var(--fg)",
+                    fontStyle: turn.role === "user" ? "normal" : "italic",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "var(--fg-dim)",
+                      marginBottom: 2,
+                      fontStyle: "normal",
+                    }}
+                  >
+                    {turn.role === "user" ? "→ you" : "← agent"}
+                  </div>
+                  <div>{turn.content}</div>
                 </div>
               ))}
-              {chatBusy && (
-                <div className="chat-msg assistant">
-                  <span className="spinner" /> thinking on 0G Compute…
-                </div>
-              )}
             </div>
-
-            <div className="chat-input-row">
+            <div className="row mt-8">
               <input
-                type="text"
-                placeholder="Type a message…"
+                style={{ flex: 1 }}
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    sendChat();
+                    handleChat();
                   }
                 }}
-                disabled={chatBusy || !personality}
+                placeholder="Type a message…"
+                disabled={chatBusy}
               />
               <button
                 className="primary"
-                onClick={sendChat}
-                disabled={chatBusy || !personality || !chatInput.trim()}
+                onClick={handleChat}
+                disabled={chatBusy || !chatInput.trim()}
               >
-                Send
+                {chatBusy ? <span className="spinner" /> : "Send"}
               </button>
             </div>
-
             {chatError && (
-              <div className="mt-8" style={{ color: "var(--danger)", fontSize: 13 }}>
+              <div style={{ fontSize: 12, color: "var(--error)", marginTop: 6 }}>
                 {chatError}
               </div>
             )}
-            {!wallet.address && (
-              <div className="mt-8 dim" style={{ fontSize: 13 }}>
-                Note: anyone can chat. Recording a summon on-chain requires a connected wallet.
-              </div>
-            )}
+          </div>
+
+          {/* On-chain details */}
+          <div className="card">
+            <div className="card-title">On-chain</div>
+            <div className="field">
+              <div className="field-label">Contract</div>
+              <a
+                href={`https://chainscan-galileo.0g.ai/address/${AGENTMINT_ADDRESS}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mono-addr"
+              >
+                {contractName} — {AGENTMINT_ADDRESS}
+              </a>
+            </div>
+            <div className="field">
+              <div className="field-label">Token ID</div>
+              <div className="mono-addr">#{id}</div>
+            </div>
+            <div className="field">
+              <div className="field-label">Personality Hash</div>
+              <div className="mono-addr">{agent.personalityHash}</div>
+            </div>
+            <div className="field">
+              <div className="field-label">Token URI</div>
+              <div className="mono-addr">{agent.tokenURI}</div>
+            </div>
+            <div className="field">
+              <div className="field-label">Owner</div>
+              <div className="mono-addr">{agent.owner}</div>
+            </div>
+            <div className="field">
+              <div className="field-label">Creator</div>
+              <div className="mono-addr">{agent.creator}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -410,13 +578,38 @@ export default function AgentDetailPage() {
   );
 }
 
-function KV({ k, v }: { k: string; v: React.ReactNode }) {
+function Stat({
+  label,
+  value,
+  accent,
+  accent2,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+  accent2?: boolean;
+}) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: 12 }}>
-      <div className="dim" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.12em" }}>
-        {k}
+    <div
+      style={{
+        background: "var(--bg-elev)",
+        borderRadius: 6,
+        padding: 10,
+        border: "1px solid var(--border)",
+      }}
+    >
+      <div style={{ fontSize: 10, color: "var(--fg-dim)", marginBottom: 2, letterSpacing: 0.5 }}>
+        {label.toUpperCase()}
       </div>
-      <div style={{ minWidth: 0 }}>{v}</div>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 700,
+          color: accent ? "var(--accent)" : accent2 ? "#fb7185" : "var(--fg)",
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
