@@ -51,6 +51,13 @@ const SAMPLE_DESCRIPTIONS = [
   "A gentle librarian AI that always finds the perfect book recommendation for your mood.",
 ];
 
+const FEATURED_AGENTS_FALLBACK: FeaturedAgent[] = [
+  { tokenId: 4, name: "Captain Jack Sparrow", description: "A witty 18th century pirate captain from the Caribbean", traits: ["cunning", "charming", "lucky"], rarity: 4, level: 3, milestoneName: "Wise", summonCount: 17, score: 0, personalityHash: "" },
+  { tokenId: 5, name: "Hattori Heiji",        description: "A stoic samurai from feudal Japan with honor above all",     traits: ["disciplined", "honorable", "wise"],   rarity: 1, level: 1, milestoneName: "Initiate", summonCount: 0,  score: 0, personalityHash: "" },
+  { tokenId: 6, name: "Dr. Luna Stargazer",   description: "An eccentric astrophysicist obsessed with black holes",       traits: ["curious", "eccentric", "intelligent"], rarity: 2, level: 1, milestoneName: "Initiate", summonCount: 0,  score: 0, personalityHash: "" },
+  { tokenId: 7, name: "Bard the Comedian",    description: "A medieval jester who turns everything into a pun",           traits: ["witty", "chaotic", "warm"],           rarity: 3, level: 1, milestoneName: "Initiate", summonCount: 0,  score: 0, personalityHash: "" },
+];
+
 export default function HomePage() {
   const wallet = useWallet();
   const [description, setDescription] = useState("");
@@ -65,9 +72,7 @@ export default function HomePage() {
   // Live stats
   const [totalMinted, setTotalMinted] = useState<number | null>(null);
   const [totalSummons, setTotalSummons] = useState<number | null>(null);
-
-  // Featured agents (minted demos)
-  const [featured, setFeatured] = useState<FeaturedAgent[]>([]);
+  const [featured, setFeatured] = useState<FeaturedAgent[]>(FEATURED_AGENTS_FALLBACK);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,32 +89,33 @@ export default function HomePage() {
     return () => { cancelled = true; };
   }, [mintedTokenId]);
 
-  // Load featured agents from /api/agents
+  // Load agents from /api/agents to merge with fallback
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/agents?limit=8&sort=newest");
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) return;
         if (cancelled) return;
         const agents = (data.agents || []).slice(0, 4);
-        const enriched: FeaturedAgent[] = agents.map((a: any, i: number) => ({
-          tokenId: a.tokenId,
-          name: ["Captain Jack Sparrow", "Hattori Heiji", "Dr. Luna Stargazer", "Bard the Comedian"][i] || `Agent #${a.tokenId}`,
-          description: ["A witty pirate captain from the Caribbean", "A stoic samurai with honor above all", "An eccentric astrophysicist obsessed with black holes", "A medieval jester who turns everything into a pun"][i] || "An on-chain AI agent",
-          traits: [["cunning", "charming", "lucky"], ["disciplined", "honorable", "wise"], ["curious", "eccentric", "intelligent"], ["witty", "chaotic", "warm"]][i] || ["evolving", "on-chain"],
-          rarity: Math.min(5, Math.floor(Math.random() * 5) + (a.summonCount > 10 ? 1 : 0)),
-          level: Math.max(1, Math.floor(Math.sqrt(a.summonCount / 2)) + 1),
-          milestoneName: a.summonCount >= 40 ? "Ancient" : a.summonCount >= 15 ? "Wise" : a.summonCount >= 5 ? "Curious" : "Initiate",
-          summonCount: a.summonCount || 0,
-          score: a.score || 0,
-          personalityHash: a.personalityHash,
-        }));
+        if (agents.length === 0) return;
+        // Build enriched list using on-chain data + our metadata
+        const enriched: FeaturedAgent[] = agents.map((a: any, i: number) => {
+          const fallback = FEATURED_AGENTS_FALLBACK[i] || FEATURED_AGENTS_FALLBACK[0];
+          return {
+            ...fallback,
+            tokenId: a.tokenId,
+            summonCount: a.summonCount || 0,
+            level: Math.max(1, Math.floor(Math.sqrt((a.summonCount || 0) / 2)) + 1),
+            rarity: a.rarity ?? fallback.rarity,
+            score: a.score || 0,
+            personalityHash: a.personalityHash,
+            milestoneName: (a.summonCount || 0) >= 40 ? "Ancient" : (a.summonCount || 0) >= 15 ? "Wise" : (a.summonCount || 0) >= 5 ? "Curious" : "Initiate",
+          };
+        });
         setFeatured(enriched);
-      } catch (e) {
-        // silently fail
-      }
+      } catch (e) {}
     })();
     return () => { cancelled = true; };
   }, [mintedTokenId]);
@@ -227,113 +233,76 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="landing">
       {/* HERO */}
-      <section className="relative overflow-hidden border-b border-white/5">
-        <div className="absolute inset-0 bg-gradient-to-br from-violet-900/20 via-transparent to-cyan-900/20" />
-        <div
-          className="absolute inset-0 opacity-30"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 20% 30%, rgba(139,92,246,0.18), transparent 50%), radial-gradient(circle at 80% 70%, rgba(34,211,238,0.18), transparent 50%)",
-          }}
-        />
-        <div className="relative mx-auto max-w-6xl px-6 py-20 sm:py-28">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-2xl">🏴‍☠️</span>
-            <span className="text-xs font-mono uppercase tracking-widest text-violet-300">
-              Zero Cup 2026 · 0G Galileo
-            </span>
-          </div>
-          <h1 className="text-5xl sm:text-7xl font-black tracking-tight leading-[0.95]">
-            <span className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-cyan-300 bg-clip-text text-transparent">
-              AgentMint
-            </span>
+      <section className="hero-wrap">
+        <div className="container" style={{ padding: "80px 24px" }}>
+          <span className="badge anim-pulse">🏆 Zero Cup 2026 · 0G Galileo</span>
+          <h1 className="anim-fade-up" style={{ marginTop: 20 }}>
+            <span className="grad-text">AgentMint</span>
             <br />
-            <span className="text-white/90 text-3xl sm:text-5xl">Evolving AI Agents</span>
+            <span className="grad-text-soft" style={{ fontSize: "0.5em", fontWeight: 600 }}>Evolving AI Agents</span>
             <br />
-            <span className="text-white/60 text-2xl sm:text-3xl font-light">as on-chain iNFTs</span>
+            <span className="grad-text-soft" style={{ fontSize: "0.36em", fontWeight: 400 }}>as on-chain iNFTs</span>
           </h1>
-          <p className="mt-6 max-w-2xl text-lg text-white/70 leading-relaxed">
-            Describe a personality. <span className="text-violet-300 font-semibold">0G Compute</span> generates its soul.
-            <span className="text-cyan-300 font-semibold"> 0G Storage</span> anchors it forever.
-            Every chat makes the agent <span className="text-fuchsia-300 font-semibold">level up, hit milestones, and earn rarity</span> on-chain.
+          <p className="lead anim-fade-up" style={{ marginTop: 24, animationDelay: "0.1s" }}>
+            Describe a personality. <strong style={{ color: "#c4b5fd" }}>0G Compute</strong> generates its soul.
+            <strong style={{ color: "#67e8f9" }}> 0G Storage</strong> anchors it forever.
+            Every chat makes the agent <strong style={{ color: "#f0abfc" }}>level up, hit milestones, and earn rarity</strong> on-chain.
           </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a
-              href="#mint"
-              className="rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 px-6 py-3 font-semibold text-white shadow-lg shadow-violet-500/40 transition hover:scale-105 hover:shadow-violet-500/60"
-            >
-              ✦ Mint Your Agent
-            </a>
-            <Link
-              href="/explore"
-              className="rounded-lg border border-white/20 bg-white/5 px-6 py-3 font-semibold text-white/90 backdrop-blur transition hover:bg-white/10"
-            >
-              Explore Gallery →
-            </Link>
-            <Link
-              href="/leaderboard"
-              className="rounded-lg border border-white/20 bg-white/5 px-6 py-3 font-semibold text-white/90 backdrop-blur transition hover:bg-white/10"
-            >
-              🏆 Leaderboard
-            </Link>
+          <div className="row anim-fade-up" style={{ marginTop: 32, animationDelay: "0.2s" }}>
+            <a href="#mint" className="btn-grad">✦ Mint Your Agent</a>
+            <Link href="/explore" className="btn-ghost">Explore Gallery →</Link>
+            <Link href="/leaderboard" className="btn-ghost">🏆 Leaderboard</Link>
           </div>
 
           {/* Live stats */}
-          <div className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatPill
-              icon="🧬"
-              label="iNFTs Minted"
-              value={totalMinted !== null ? totalMinted.toString() : "—"}
-              accent="violet"
-            />
-            <StatPill
-              icon="💬"
-              label="Total Summons"
-              value={totalSummons !== null ? totalSummons.toString() : "—"}
-              accent="cyan"
-            />
-            <StatPill
-              icon="⚡"
-              label="Compute Calls"
-              value={`${totalSummons !== null ? totalSummons * 2 : "—"}`}
-              accent="fuchsia"
-              sub="(2 per chat)"
-            />
-            <StatPill
-              icon="📦"
-              label="Storage Roots"
-              value={totalMinted !== null ? totalMinted.toString() : "—"}
-              accent="amber"
-              sub="(1 per agent)"
-            />
+          <div className="grid-4" style={{ marginTop: 48 }}>
+            <div className="stat-card violet anim-fade-up" style={{ animationDelay: "0.3s" }}>
+              <div style={{ fontSize: 28 }}>🧬</div>
+              <div className="lbl">iNFTs Minted</div>
+              <div className="num">{totalMinted !== null ? totalMinted : "—"}</div>
+            </div>
+            <div className="stat-card cyan anim-fade-up" style={{ animationDelay: "0.4s" }}>
+              <div style={{ fontSize: 28 }}>💬</div>
+              <div className="lbl">Total Summons</div>
+              <div className="num">{totalSummons !== null ? totalSummons : "—"}</div>
+            </div>
+            <div className="stat-card fuchsia anim-fade-up" style={{ animationDelay: "0.5s" }}>
+              <div style={{ fontSize: 28 }}>⚡</div>
+              <div className="lbl">Compute Calls</div>
+              <div className="num">{totalSummons !== null ? totalSummons * 2 : "—"}</div>
+              <div className="dim" style={{ fontSize: 10, marginTop: 4, opacity: 0.6 }}>(2 per chat)</div>
+            </div>
+            <div className="stat-card amber anim-fade-up" style={{ animationDelay: "0.6s" }}>
+              <div style={{ fontSize: 28 }}>📦</div>
+              <div className="lbl">Storage Roots</div>
+              <div className="num">{totalMinted !== null ? totalMinted : "—"}</div>
+              <div className="dim" style={{ fontSize: 10, marginTop: 4, opacity: 0.6 }}>(1 per agent)</div>
+            </div>
           </div>
         </div>
       </section>
 
       {/* HOW IT WORKS */}
-      <section className="border-b border-white/5 bg-black/30">
-        <div className="mx-auto max-w-6xl px-6 py-16">
-          <h2 className="text-3xl font-bold mb-2">How it works</h2>
-          <p className="text-white/60 mb-10">Four steps. From idea to on-chain evolving agent in under 60 seconds.</p>
-          <div className="grid sm:grid-cols-4 gap-4">
+      <section style={{ background: "rgba(0,0,0,0.3)" }}>
+        <div className="section-pad">
+          <h2>How it works</h2>
+          <p className="dim" style={{ marginBottom: 40 }}>Four steps. From idea to on-chain evolving agent in under 60 seconds.</p>
+          <div className="grid-4">
             {[
               { n: 1, icon: "✍️", title: "Describe", text: "Type 1-2 sentences about the agent you want. Pirate, samurai, scientist — anything." },
               { n: 2, icon: "🧠", title: "Generate", text: "0G Compute (qwen2.5-omni-7b) writes a full personality: system prompt, traits, voice." },
               { n: 3, icon: "📦", title: "Store", text: "Personality JSON is uploaded to 0G Storage. Merkle root hash goes on-chain." },
               { n: 4, icon: "⛓️", title: "Mint iNFT", text: "ERC-721 NFT with personality hash. Now you can chat, vote, and watch it evolve." },
             ].map((s) => (
-              <div
-                key={s.n}
-                className="group rounded-xl border border-white/10 bg-white/5 p-5 backdrop-blur transition hover:border-violet-400/40 hover:bg-white/10"
-              >
-                <div className="text-3xl mb-2">{s.icon}</div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-black text-violet-300">{s.n}</span>
-                  <span className="text-lg font-semibold">{s.title}</span>
+              <div key={s.n} className="step-card">
+                <div style={{ fontSize: 32, marginBottom: 8 }}>{s.icon}</div>
+                <div className="row" style={{ alignItems: "baseline", gap: 8 }}>
+                  <span style={{ fontSize: 24, fontWeight: 900, color: "#c4b5fd" }}>{s.n}</span>
+                  <span style={{ fontSize: 18, fontWeight: 700 }}>{s.title}</span>
                 </div>
-                <p className="mt-2 text-sm text-white/60 leading-relaxed">{s.text}</p>
+                <p className="dim" style={{ marginTop: 8, fontSize: 13 }}>{s.text}</p>
               </div>
             ))}
           </div>
@@ -342,53 +311,44 @@ export default function HomePage() {
 
       {/* FEATURED AGENTS */}
       {featured.length > 0 && (
-        <section className="border-b border-white/5">
-          <div className="mx-auto max-w-6xl px-6 py-16">
-            <div className="flex items-end justify-between mb-8">
+        <section>
+          <div className="section-pad">
+            <div className="row" style={{ alignItems: "flex-end", justifyContent: "space-between", marginBottom: 32, flexWrap: "wrap", gap: 16 }}>
               <div>
-                <h2 className="text-3xl font-bold">Live on-chain</h2>
-                <p className="text-white/60 mt-1">Try chatting with these — they respond in-character via 0G Compute.</p>
+                <h2>Live on-chain</h2>
+                <p className="dim" style={{ marginTop: 4 }}>Try chatting with these — they respond in-character via 0G Compute.</p>
               </div>
-              <Link href="/explore" className="text-violet-300 hover:text-violet-200 text-sm font-semibold">
+              <Link href="/explore" style={{ color: "#c4b5fd", textDecoration: "none", fontSize: 14, fontWeight: 600 }}>
                 View all →
               </Link>
             </div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid-4">
               {featured.map((a) => (
-                <Link
-                  key={a.tokenId}
-                  href={`/agent/${a.tokenId}`}
-                  className="group rounded-xl border border-white/10 bg-white/5 p-5 backdrop-blur transition hover:scale-[1.02] hover:border-violet-400/40"
-                >
-                  {/* Avatar circle */}
+                <Link key={a.tokenId} href={`/agent/${a.tokenId}`} className="agent-card">
                   <div
-                    className="h-16 w-16 rounded-full mb-4 flex items-center justify-center text-2xl font-black"
+                    className="avatar-circle"
                     style={{
                       background: `linear-gradient(135deg, ${RARITY_COLORS[a.rarity] || "#888"}33, transparent)`,
                       border: `2px solid ${RARITY_COLORS[a.rarity] || "#888"}`,
                       boxShadow: `0 0 20px ${RARITY_COLORS[a.rarity] || "#888"}44`,
+                      color: RARITY_COLORS[a.rarity] || "#888",
                     }}
                   >
                     {a.name[0]}
                   </div>
-                  <div className="text-xs font-mono text-violet-300 mb-1">#{a.tokenId}</div>
-                  <div className="font-semibold text-lg mb-1 group-hover:text-violet-200">{a.name}</div>
-                  <div className="text-xs text-white/50 line-clamp-2 mb-3">{a.description}</div>
-                  <div className="flex flex-wrap gap-1 mb-3">
+                  <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: "#c4b5fd", marginBottom: 4 }}>#{a.tokenId}</div>
+                  <h3 style={{ fontSize: 18, marginBottom: 4 }}>{a.name}</h3>
+                  <div className="dim" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.4 }}>{a.description}</div>
+                  <div className="row" style={{ gap: 4, marginBottom: 12 }}>
                     {a.traits.slice(0, 3).map((t) => (
-                      <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/70">
-                        {t}
-                      </span>
+                      <span key={t} className="pill">{t}</span>
                     ))}
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span
-                      className="font-mono font-semibold"
-                      style={{ color: RARITY_COLORS[a.rarity] || "#888" }}
-                    >
+                  <div className="row" style={{ justifyContent: "space-between", fontSize: 12 }}>
+                    <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: RARITY_COLORS[a.rarity] || "#888" }}>
                       {RARITY_TIERS[a.rarity]}
                     </span>
-                    <span className="text-white/50">Lv {a.level} · {a.summonCount} chats</span>
+                    <span className="dim">Lv {a.level} · {a.summonCount} chats</span>
                   </div>
                 </Link>
               ))}
@@ -398,39 +358,39 @@ export default function HomePage() {
       )}
 
       {/* EVOLUTION EXPLAINER */}
-      <section className="border-b border-white/5 bg-gradient-to-br from-violet-950/30 to-cyan-950/30">
-        <div className="mx-auto max-w-6xl px-6 py-16">
-          <h2 className="text-3xl font-bold mb-2">Every chat makes them stronger</h2>
-          <p className="text-white/60 mb-10 max-w-2xl">
-            Unlike static NFTs, AgentMint iNFTs <span className="text-violet-300 font-semibold">evolve on-chain</span>.
+      <section style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.12), rgba(34,211,238,0.12))" }}>
+        <div className="section-pad">
+          <h2>Every chat makes them stronger</h2>
+          <p className="dim" style={{ marginBottom: 32, maxWidth: 640 }}>
+            Unlike static NFTs, AgentMint iNFTs <strong style={{ color: "#c4b5fd" }}>evolve on-chain</strong>.
             Every summon increments a counter, levels up the agent, and unlocks milestones.
           </p>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid-4">
             {[
               { emoji: "🌱", name: "Initiate", at: "0 chats", desc: "Freshly minted. Pure potential." },
               { emoji: "🔍", name: "Curious", at: "5 chats", desc: "Starting to understand the world." },
               { emoji: "🦉", name: "Wise", at: "15 chats", desc: "Solid grasp of conversation. Deepens." },
               { emoji: "🌌", name: "Ancient", at: "40 chats", desc: "Legendary status. Rarity maxes out." },
             ].map((m) => (
-              <div key={m.name} className="rounded-xl border border-white/10 bg-black/40 p-5 backdrop-blur">
-                <div className="text-4xl mb-2">{m.emoji}</div>
-                <div className="font-semibold text-lg">{m.name}</div>
-                <div className="text-xs text-violet-300 font-mono mb-2">{m.at}</div>
-                <div className="text-sm text-white/60">{m.desc}</div>
+              <div key={m.name} className="tier-card">
+                <div style={{ fontSize: 40, marginBottom: 8 }}>{m.emoji}</div>
+                <h3>{m.name}</h3>
+                <div style={{ fontSize: 11, color: "#c4b5fd", fontFamily: "var(--mono)", marginTop: 4, marginBottom: 8 }}>{m.at}</div>
+                <div className="dim" style={{ fontSize: 13 }}>{m.desc}</div>
               </div>
             ))}
           </div>
-          <div className="mt-8 flex flex-wrap gap-3 text-sm">
-            <span className="rounded-full border border-violet-400/40 bg-violet-500/10 px-3 py-1 text-violet-200">
+          <div className="row" style={{ marginTop: 24, gap: 8 }}>
+            <span className="pill" style={{ border: "1px solid rgba(139,92,246,0.4)", background: "rgba(139,92,246,0.1)", color: "#c4b5fd" }}>
               ✦ Level = floor(√(chats/2)) + 1
             </span>
-            <span className="rounded-full border border-cyan-400/40 bg-cyan-500/10 px-3 py-1 text-cyan-200">
+            <span className="pill" style={{ border: "1px solid rgba(34,211,238,0.4)", background: "rgba(34,211,238,0.1)", color: "#67e8f9" }}>
               ✦ Rarity = level × votes
             </span>
-            <span className="rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-fuchsia-200">
+            <span className="pill" style={{ border: "1px solid rgba(217,70,239,0.4)", background: "rgba(217,70,239,0.1)", color: "#f0abfc" }}>
               ✦ Votes signed on-chain
             </span>
-            <span className="rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-amber-200">
+            <span className="pill" style={{ border: "1px solid rgba(251,191,36,0.4)", background: "rgba(251,191,36,0.1)", color: "#fde68a" }}>
               ✦ Personality hash anchored forever
             </span>
           </div>
@@ -438,34 +398,29 @@ export default function HomePage() {
       </section>
 
       {/* MINT FLOW */}
-      <section id="mint" className="bg-black/40">
-        <div className="mx-auto max-w-4xl px-6 py-16">
-          <h2 className="text-3xl font-bold mb-2">Mint your own</h2>
-          <p className="text-white/60 mb-8">Cost: 0.001 0G + gas. Lives forever on 0G Galileo testnet.</p>
+      <section id="mint" style={{ background: "rgba(0,0,0,0.4)" }}>
+        <div className="container-sm section-pad">
+          <h2>Mint your own</h2>
+          <p className="dim" style={{ marginBottom: 32 }}>Cost: 0.001 0G + gas. Lives forever on 0G Galileo testnet.</p>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+          <div className="mint-card">
             {/* Stepper */}
-            <div className="flex items-center gap-2 mb-6">
+            <div className="row" style={{ marginBottom: 24, gap: 8 }}>
               {STEPS.map((s, i) => (
-                <div key={s.num} className="flex items-center gap-2 flex-1">
-                  <div
-                    className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold transition ${
-                      i <= stepIdx
-                        ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white"
-                        : "bg-white/10 text-white/40"
-                    }`}
-                  >
+                <div key={s.num} className="row" style={{ flex: 1, alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <div className={`step-dot ${i < stepIdx ? "done" : i === stepIdx ? "active" : "pending"}`}>
                     {i < stepIdx ? "✓" : s.num}
                   </div>
-                  <div
-                    className={`text-xs font-semibold ${
-                      i <= stepIdx ? "text-white" : "text-white/40"
-                    }`}
-                  >
+                  <div style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: i <= stepIdx ? "white" : "rgba(255,255,255,0.4)",
+                    whiteSpace: "nowrap",
+                  }}>
                     {s.label}
                   </div>
                   {i < STEPS.length - 1 && (
-                    <div className={`flex-1 h-px ${i < stepIdx ? "bg-violet-400" : "bg-white/10"}`} />
+                    <div className={`step-line ${i < stepIdx ? "active" : ""}`} />
                   )}
                 </div>
               ))}
@@ -473,24 +428,25 @@ export default function HomePage() {
 
             {/* Description input */}
             <div>
-              <label className="block text-sm font-semibold mb-2 text-white/80">
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 8, color: "rgba(255,255,255,0.8)" }}>
                 1. Describe your AI agent
               </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="A melancholic poet-bot from a dying star, speaks only in haiku…"
-                className="w-full rounded-lg border border-white/10 bg-black/40 p-3 text-white placeholder-white/30 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                className="form-input"
                 rows={3}
                 disabled={busy !== null}
               />
-              <div className="mt-2 flex flex-wrap gap-1">
-                <span className="text-xs text-white/40 mr-2">Try:</span>
+              <div className="row" style={{ marginTop: 8, gap: 6 }}>
+                <span className="dim" style={{ fontSize: 11 }}>Try:</span>
                 {SAMPLE_DESCRIPTIONS.map((s, i) => (
                   <button
                     key={i}
                     onClick={() => setDescription(s)}
-                    className="text-xs rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/70 hover:bg-white/10 transition"
+                    className="pill"
+                    style={{ cursor: "pointer", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.7)" }}
                     disabled={busy !== null}
                   >
                     {s.slice(0, 30)}…
@@ -500,7 +456,8 @@ export default function HomePage() {
               <button
                 onClick={handleGenerate}
                 disabled={!description.trim() || busy !== null}
-                className="mt-3 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-2 font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition hover:scale-105"
+                className="btn-grad"
+                style={{ marginTop: 12, opacity: (!description.trim() || busy !== null) ? 0.4 : 1 }}
               >
                 {busy === "generating" ? "Generating…" : "🧠 Generate Personality"}
               </button>
@@ -508,21 +465,22 @@ export default function HomePage() {
 
             {/* Personality preview */}
             {personality && (
-              <div className="mt-6 rounded-lg border border-violet-400/30 bg-violet-500/5 p-4">
-                <div className="text-xs font-mono uppercase text-violet-300 mb-2">Generated personality</div>
-                <div className="text-xl font-bold">{personality.name}</div>
-                <div className="text-sm text-white/70 mt-1">{personality.description}</div>
-                <div className="mt-3 flex flex-wrap gap-1">
+              <div className="preview-card" style={{ marginTop: 24 }}>
+                <div className="dim" style={{ fontSize: 11, fontFamily: "var(--mono)", textTransform: "uppercase", marginBottom: 8, color: "#c4b5fd" }}>
+                  Generated personality
+                </div>
+                <h3 style={{ fontSize: 22 }}>{personality.name}</h3>
+                <p className="dim" style={{ fontSize: 14, marginTop: 4 }}>{personality.description}</p>
+                <div className="row" style={{ gap: 6, marginTop: 12 }}>
                   {personality.traits.map((t) => (
-                    <span key={t} className="text-xs rounded-full bg-violet-500/20 px-2 py-0.5 text-violet-200">
-                      {t}
-                    </span>
+                    <span key={t} className="pill" style={{ background: "rgba(139,92,246,0.2)", color: "#c4b5fd" }}>{t}</span>
                   ))}
                 </div>
                 <button
                   onClick={handleUpload}
                   disabled={busy !== null}
-                  className="mt-4 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 px-5 py-2 font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition hover:scale-105"
+                  className="btn-grad"
+                  style={{ marginTop: 16, background: "linear-gradient(135deg, #06b6d4, #3b82f6)" }}
                 >
                   {busy === "uploading" ? "Uploading…" : "📦 Upload to 0G Storage"}
                 </button>
@@ -531,15 +489,19 @@ export default function HomePage() {
 
             {/* Storage proof */}
             {rootHash && (
-              <div className="mt-6 rounded-lg border border-cyan-400/30 bg-cyan-500/5 p-4">
-                <div className="text-xs font-mono uppercase text-cyan-300 mb-2">Anchored to 0G Storage</div>
-                <div className="font-mono text-sm break-all text-white/80">rootHash: {rootHash}</div>
+              <div className="preview-card storage" style={{ marginTop: 24 }}>
+                <div className="dim" style={{ fontSize: 11, fontFamily: "var(--mono)", textTransform: "uppercase", marginBottom: 8, color: "#67e8f9" }}>
+                  Anchored to 0G Storage
+                </div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 13, wordBreak: "break-all", color: "rgba(255,255,255,0.8)" }}>
+                  rootHash: {rootHash}
+                </div>
                 {storageTxHash && (
                   <a
                     href={`https://chainscan-galileo.0g.ai/tx/${storageTxHash}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-xs text-cyan-300 hover:text-cyan-200 mt-2 inline-block"
+                    style={{ color: "#67e8f9", fontSize: 12, marginTop: 8, display: "inline-block" }}
                   >
                     View storage tx →
                   </a>
@@ -547,7 +509,13 @@ export default function HomePage() {
                 <button
                   onClick={handleMint}
                   disabled={busy !== null || !wallet.address}
-                  className="mt-3 ml-3 rounded-lg bg-gradient-to-r from-fuchsia-500 to-pink-500 px-5 py-2 font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition hover:scale-105"
+                  className="btn-grad"
+                  style={{
+                    marginTop: 12,
+                    marginLeft: 8,
+                    background: "linear-gradient(135deg, #d946ef, #ec4899)",
+                    opacity: (busy !== null || !wallet.address) ? 0.4 : 1,
+                  }}
                 >
                   {busy === "minting" ? "Minting…" : !wallet.address ? "🔌 Connect wallet to mint" : "⛓️ Mint iNFT (0.001 0G)"}
                 </button>
@@ -556,11 +524,11 @@ export default function HomePage() {
 
             {/* Mint success */}
             {mintedTokenId && (
-              <div className="mt-6 rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-4">
-                <div className="text-emerald-300 font-bold">🎉 iNFT #{mintedTokenId} minted!</div>
-                <div className="text-sm text-white/70 mt-1">
+              <div className="preview-card success" style={{ marginTop: 24 }}>
+                <div style={{ color: "#6ee7b7", fontWeight: 700 }}>🎉 iNFT #{mintedTokenId} minted!</div>
+                <div className="dim" style={{ fontSize: 14, marginTop: 6 }}>
                   View it:{" "}
-                  <Link href={`/agent/${mintedTokenId}`} className="text-violet-300 hover:text-violet-200 underline">
+                  <Link href={`/agent/${mintedTokenId}`} style={{ color: "#c4b5fd" }}>
                     /agent/{mintedTokenId}
                   </Link>
                 </div>
@@ -569,14 +537,14 @@ export default function HomePage() {
 
             {/* Logs */}
             {logs.length > 0 && (
-              <div className="mt-6 max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-black/60 p-3 font-mono text-xs">
+              <div className="log-box" style={{ marginTop: 24 }}>
                 {logs.map((l, i) => (
                   <div key={i} className={
-                    l.kind === "success" ? "text-emerald-300" :
-                    l.kind === "error" ? "text-rose-300" :
-                    "text-white/60"
+                    l.kind === "success" ? "log-success" :
+                    l.kind === "error" ? "log-error" :
+                    "log-info"
                   }>
-                    <span className="text-white/30">[{l.ts}]</span> {l.msg}
+                    <span style={{ color: "rgba(255,255,255,0.3)" }}>[{l.ts}]</span> {l.msg}
                   </div>
                 ))}
               </div>
@@ -586,43 +554,22 @@ export default function HomePage() {
       </section>
 
       {/* FOOTER */}
-      <footer className="border-t border-white/5 bg-black/60">
-        <div className="mx-auto max-w-6xl px-6 py-10 text-center text-sm text-white/50">
-          <div className="mb-2">
-            Built on{" "}
-            <a href="https://0g.ai" target="_blank" rel="noreferrer" className="text-violet-300 hover:text-violet-200">
-              0G
-            </a>{" "}
-            · Galileo Testnet · Contract{" "}
-            <a
-              href={`https://chainscan-galileo.0g.ai/address/${AGENTMINT_ADDRESS}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-violet-300 hover:text-violet-200 font-mono"
-            >
-              {AGENTMINT_ADDRESS.slice(0, 8)}…{AGENTMINT_ADDRESS.slice(-6)}
-            </a>
-          </div>
-          <div>AgentMint · Zero Cup 2026 · 0G Vibe Coding Tournament</div>
+      <footer className="footer-wrap">
+        <div style={{ marginBottom: 8 }}>
+          Built on{" "}
+          <a href="https://0g.ai" target="_blank" rel="noreferrer">0G</a>
+          {" "}· Galileo Testnet · Contract{" "}
+          <a
+            href={`https://chainscan-galileo.0g.ai/address/${AGENTMINT_ADDRESS}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontFamily: "var(--mono)" }}
+          >
+            {AGENTMINT_ADDRESS.slice(0, 8)}…{AGENTMINT_ADDRESS.slice(-6)}
+          </a>
         </div>
+        <div>AgentMint · Zero Cup 2026 · 0G Vibe Coding Tournament</div>
       </footer>
-    </div>
-  );
-}
-
-function StatPill({ icon, label, value, accent, sub }: { icon: string; label: string; value: string; accent: string; sub?: string }) {
-  const colors: Record<string, string> = {
-    violet: "border-violet-400/30 bg-violet-500/10 text-violet-200",
-    cyan: "border-cyan-400/30 bg-cyan-500/10 text-cyan-200",
-    fuchsia: "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-200",
-    amber: "border-amber-400/30 bg-amber-500/10 text-amber-200",
-  };
-  return (
-    <div className={`rounded-xl border ${colors[accent]} p-4 backdrop-blur`}>
-      <div className="text-2xl mb-1">{icon}</div>
-      <div className="text-xs uppercase tracking-wider opacity-70">{label}</div>
-      <div className="text-3xl font-black mt-1">{value}</div>
-      {sub && <div className="text-[10px] opacity-60 mt-1">{sub}</div>}
     </div>
   );
 }
