@@ -2,17 +2,18 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "/home/ubuntu/agentmint/contracts/AgentMint.sol": {
-      "lastModificationDate": 1781750382862,
-      "contentHash": "9952d1595a4e0eeaccc6b615accd6c3a",
+      "lastModificationDate": 1781756278043,
+      "contentHash": "8414ed72ee9afa87bf6b1b430873134b",
       "sourceName": "contracts/AgentMint.sol",
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -48,11 +49,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -86,11 +88,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -127,11 +130,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -168,11 +172,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -204,11 +209,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -242,11 +248,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -281,11 +288,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -317,11 +325,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -355,11 +364,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -391,11 +401,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -430,11 +441,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -466,11 +478,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -510,11 +523,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -548,11 +562,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -584,11 +599,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -620,11 +636,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -658,11 +675,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -696,11 +714,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -734,11 +753,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [
@@ -773,11 +793,12 @@
       "solcConfig": {
         "version": "0.8.24",
         "settings": {
-          "evmVersion": "cancun",
           "optimizer": {
             "enabled": true,
             "runs": 200
           },
+          "viaIR": true,
+          "evmVersion": "cancun",
           "outputSelection": {
             "*": {
               "*": [

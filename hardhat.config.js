@@ -5,8 +5,9 @@ module.exports = {
   solidity: {
     version: "0.8.24",
     settings: {
-      evmVersion: "cancun",
       optimizer: { enabled: true, runs: 200 },
+      viaIR: true,
+      evmVersion: "cancun",
     },
   },
   networks: {
