@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.env
+.env.local
+.next-build/
+.auth_cookies.json
+.provider_info.json
+build/
+out/
+dist/
+*.log
+.DS_Store
+scripts/setup_compute.js
