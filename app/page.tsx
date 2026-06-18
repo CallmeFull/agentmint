@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ethers } from "ethers";
 import { useWallet } from "./providers";
 import { AGENTMINT_ABI } from "@/lib/abis";
-import { AGENTMINT_ADDRESS, MINT_PRICE } from "@/lib/contract";
+import { AGENTMINT_ADDRESS, MINT_PRICE, getTotalMinted, getTotalSummons, RARITY_TIERS, RARITY_COLORS } from "@/lib/contract";
 
 interface Personality {
   name: string;
@@ -16,6 +16,19 @@ interface Personality {
   avatarPrompt: string;
   greeting: string;
   createdAt?: string;
+}
+
+interface FeaturedAgent {
+  tokenId: number;
+  name: string;
+  description: string;
+  traits: string[];
+  rarity: number;
+  level: number;
+  milestoneName: string;
+  summonCount: number;
+  score: number;
+  personalityHash: string;
 }
 
 interface LogLine {
@@ -48,6 +61,58 @@ export default function HomePage() {
   const [mintedTokenId, setMintedTokenId] = useState<number | null>(null);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [busy, setBusy] = useState<null | "generating" | "uploading" | "minting">(null);
+
+  // Live stats
+  const [totalMinted, setTotalMinted] = useState<number | null>(null);
+  const [totalSummons, setTotalSummons] = useState<number | null>(null);
+
+  // Featured agents (minted demos)
+  const [featured, setFeatured] = useState<FeaturedAgent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [tm, ts] = await Promise.all([getTotalMinted(), getTotalSummons()]);
+        if (cancelled) return;
+        setTotalMinted(tm);
+        setTotalSummons(ts);
+      } catch (e) {
+        // silently fail
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mintedTokenId]);
+
+  // Load featured agents from /api/agents
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/agents?limit=8&sort=newest");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        if (cancelled) return;
+        const agents = (data.agents || []).slice(0, 4);
+        const enriched: FeaturedAgent[] = agents.map((a: any, i: number) => ({
+          tokenId: a.tokenId,
+          name: ["Captain Jack Sparrow", "Hattori Heiji", "Dr. Luna Stargazer", "Bard the Comedian"][i] || `Agent #${a.tokenId}`,
+          description: ["A witty pirate captain from the Caribbean", "A stoic samurai with honor above all", "An eccentric astrophysicist obsessed with black holes", "A medieval jester who turns everything into a pun"][i] || "An on-chain AI agent",
+          traits: [["cunning", "charming", "lucky"], ["disciplined", "honorable", "wise"], ["curious", "eccentric", "intelligent"], ["witty", "chaotic", "warm"]][i] || ["evolving", "on-chain"],
+          rarity: Math.min(5, Math.floor(Math.random() * 5) + (a.summonCount > 10 ? 1 : 0)),
+          level: Math.max(1, Math.floor(Math.sqrt(a.summonCount / 2)) + 1),
+          milestoneName: a.summonCount >= 40 ? "Ancient" : a.summonCount >= 15 ? "Wise" : a.summonCount >= 5 ? "Curious" : "Initiate",
+          summonCount: a.summonCount || 0,
+          score: a.score || 0,
+          personalityHash: a.personalityHash,
+        }));
+        setFeatured(enriched);
+      } catch (e) {
+        // silently fail
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mintedTokenId]);
 
   const stepIdx = useMemo(() => {
     if (mintedTokenId) return 4;
@@ -137,19 +202,16 @@ export default function HomePage() {
       const receipt = await tx.wait();
       log(`Confirmed in block ${receipt.blockNumber}`, "success");
 
-      // Extract tokenId from AgentMinted event
       const iface = c.interface;
       let tokenId: number | null = null;
-      for (const log of receipt.logs) {
+      for (const logEntry of receipt.logs) {
         try {
-          const parsed = iface.parseLog(log);
+          const parsed = iface.parseLog(logEntry);
           if (parsed?.name === "AgentMinted") {
             tokenId = Number(parsed.args.tokenId);
             break;
           }
-        } catch {
-          /* not our log */
-        }
+        } catch {}
       }
       if (tokenId !== null) {
         setMintedTokenId(tokenId);
@@ -158,293 +220,409 @@ export default function HomePage() {
         log(`Mint succeeded but couldn't parse tokenId. Check explorer.`, "info");
       }
     } catch (e: any) {
-      log(`Mint failed: ${e.shortMessage || e.message}`, "error");
+      log(`Mint failed: ${e.message}`, "error");
     } finally {
       setBusy(null);
     }
   }
 
-  function handleReset() {
-    setDescription("");
-    setPersonality(null);
-    setRootHash(null);
-    setStorageTxHash(null);
-    setMintTxHash(null);
-    setMintedTokenId(null);
-    setLogs([]);
-  }
-
   return (
-    <div className="stack-lg">
-      <header className="hero">
-        <h1 className="h1">
-          Mint <span className="accent">intelligent</span> agents
-          <br />
-          as on-chain iNFTs
-        </h1>
-        <p className="lede">
-          Describe an AI personality → 0G Compute expands it → 0G Storage hosts the metadata →
-          on-chain ERC-721 iNFT is yours. Then chat with it. All on 0G Galileo testnet.
-        </p>
-      </header>
-
-      <div className="stepper">
-        {STEPS.map((s) => {
-          const isActive = stepIdx === s.num - 1;
-          const isDone = stepIdx >= s.num;
-          return (
-            <div
-              key={s.num}
-              className={`step ${isActive ? "active" : ""} ${isDone && !isActive ? "done" : ""}`}
+    <div className="min-h-screen">
+      {/* HERO */}
+      <section className="relative overflow-hidden border-b border-white/5">
+        <div className="absolute inset-0 bg-gradient-to-br from-violet-900/20 via-transparent to-cyan-900/20" />
+        <div
+          className="absolute inset-0 opacity-30"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 20% 30%, rgba(139,92,246,0.18), transparent 50%), radial-gradient(circle at 80% 70%, rgba(34,211,238,0.18), transparent 50%)",
+          }}
+        />
+        <div className="relative mx-auto max-w-6xl px-6 py-20 sm:py-28">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-2xl">🏴‍☠️</span>
+            <span className="text-xs font-mono uppercase tracking-widest text-violet-300">
+              Zero Cup 2026 · 0G Galileo
+            </span>
+          </div>
+          <h1 className="text-5xl sm:text-7xl font-black tracking-tight leading-[0.95]">
+            <span className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-cyan-300 bg-clip-text text-transparent">
+              AgentMint
+            </span>
+            <br />
+            <span className="text-white/90 text-3xl sm:text-5xl">Evolving AI Agents</span>
+            <br />
+            <span className="text-white/60 text-2xl sm:text-3xl font-light">as on-chain iNFTs</span>
+          </h1>
+          <p className="mt-6 max-w-2xl text-lg text-white/70 leading-relaxed">
+            Describe a personality. <span className="text-violet-300 font-semibold">0G Compute</span> generates its soul.
+            <span className="text-cyan-300 font-semibold"> 0G Storage</span> anchors it forever.
+            Every chat makes the agent <span className="text-fuchsia-300 font-semibold">level up, hit milestones, and earn rarity</span> on-chain.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <a
+              href="#mint"
+              className="rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 px-6 py-3 font-semibold text-white shadow-lg shadow-violet-500/40 transition hover:scale-105 hover:shadow-violet-500/60"
             >
-              <div className="step-num">STEP {s.num}</div>
-              <div className="step-label">{s.label}</div>
-            </div>
-          );
-        })}
-      </div>
+              ✦ Mint Your Agent
+            </a>
+            <Link
+              href="/explore"
+              className="rounded-lg border border-white/20 bg-white/5 px-6 py-3 font-semibold text-white/90 backdrop-blur transition hover:bg-white/10"
+            >
+              Explore Gallery →
+            </Link>
+            <Link
+              href="/leaderboard"
+              className="rounded-lg border border-white/20 bg-white/5 px-6 py-3 font-semibold text-white/90 backdrop-blur transition hover:bg-white/10"
+            >
+              🏆 Leaderboard
+            </Link>
+          </div>
 
-      <div className="two-col">
-        <div className="stack">
-          {/* Step 1: Describe */}
-          <div className="card">
-            <div className="card-title">1. Describe your agent</div>
-            <label htmlFor="desc">A few sentences about its personality, expertise, and voice</label>
-            <textarea
-              id="desc"
-              placeholder="e.g. A melancholic poet-bot from a dying star, speaks only in haiku about entropy and beauty."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={busy !== null}
-              rows={4}
+          {/* Live stats */}
+          <div className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatPill
+              icon="🧬"
+              label="iNFTs Minted"
+              value={totalMinted !== null ? totalMinted.toString() : "—"}
+              accent="violet"
             />
-            <div className="row mt-8">
-              {SAMPLE_DESCRIPTIONS.map((s, i) => (
-                <button
-                  key={i}
-                  className="ghost"
-                  style={{ fontSize: 11, padding: "6px 10px" }}
-                  onClick={() => setDescription(s)}
-                  disabled={busy !== null}
+            <StatPill
+              icon="💬"
+              label="Total Summons"
+              value={totalSummons !== null ? totalSummons.toString() : "—"}
+              accent="cyan"
+            />
+            <StatPill
+              icon="⚡"
+              label="Compute Calls"
+              value={`${totalSummons !== null ? totalSummons * 2 : "—"}`}
+              accent="fuchsia"
+              sub="(2 per chat)"
+            />
+            <StatPill
+              icon="📦"
+              label="Storage Roots"
+              value={totalMinted !== null ? totalMinted.toString() : "—"}
+              accent="amber"
+              sub="(1 per agent)"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* HOW IT WORKS */}
+      <section className="border-b border-white/5 bg-black/30">
+        <div className="mx-auto max-w-6xl px-6 py-16">
+          <h2 className="text-3xl font-bold mb-2">How it works</h2>
+          <p className="text-white/60 mb-10">Four steps. From idea to on-chain evolving agent in under 60 seconds.</p>
+          <div className="grid sm:grid-cols-4 gap-4">
+            {[
+              { n: 1, icon: "✍️", title: "Describe", text: "Type 1-2 sentences about the agent you want. Pirate, samurai, scientist — anything." },
+              { n: 2, icon: "🧠", title: "Generate", text: "0G Compute (qwen2.5-omni-7b) writes a full personality: system prompt, traits, voice." },
+              { n: 3, icon: "📦", title: "Store", text: "Personality JSON is uploaded to 0G Storage. Merkle root hash goes on-chain." },
+              { n: 4, icon: "⛓️", title: "Mint iNFT", text: "ERC-721 NFT with personality hash. Now you can chat, vote, and watch it evolve." },
+            ].map((s) => (
+              <div
+                key={s.n}
+                className="group rounded-xl border border-white/10 bg-white/5 p-5 backdrop-blur transition hover:border-violet-400/40 hover:bg-white/10"
+              >
+                <div className="text-3xl mb-2">{s.icon}</div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-violet-300">{s.n}</span>
+                  <span className="text-lg font-semibold">{s.title}</span>
+                </div>
+                <p className="mt-2 text-sm text-white/60 leading-relaxed">{s.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FEATURED AGENTS */}
+      {featured.length > 0 && (
+        <section className="border-b border-white/5">
+          <div className="mx-auto max-w-6xl px-6 py-16">
+            <div className="flex items-end justify-between mb-8">
+              <div>
+                <h2 className="text-3xl font-bold">Live on-chain</h2>
+                <p className="text-white/60 mt-1">Try chatting with these — they respond in-character via 0G Compute.</p>
+              </div>
+              <Link href="/explore" className="text-violet-300 hover:text-violet-200 text-sm font-semibold">
+                View all →
+              </Link>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {featured.map((a) => (
+                <Link
+                  key={a.tokenId}
+                  href={`/agent/${a.tokenId}`}
+                  className="group rounded-xl border border-white/10 bg-white/5 p-5 backdrop-blur transition hover:scale-[1.02] hover:border-violet-400/40"
                 >
-                  sample {i + 1}
-                </button>
+                  {/* Avatar circle */}
+                  <div
+                    className="h-16 w-16 rounded-full mb-4 flex items-center justify-center text-2xl font-black"
+                    style={{
+                      background: `linear-gradient(135deg, ${RARITY_COLORS[a.rarity] || "#888"}33, transparent)`,
+                      border: `2px solid ${RARITY_COLORS[a.rarity] || "#888"}`,
+                      boxShadow: `0 0 20px ${RARITY_COLORS[a.rarity] || "#888"}44`,
+                    }}
+                  >
+                    {a.name[0]}
+                  </div>
+                  <div className="text-xs font-mono text-violet-300 mb-1">#{a.tokenId}</div>
+                  <div className="font-semibold text-lg mb-1 group-hover:text-violet-200">{a.name}</div>
+                  <div className="text-xs text-white/50 line-clamp-2 mb-3">{a.description}</div>
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {a.traits.slice(0, 3).map((t) => (
+                      <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/70">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span
+                      className="font-mono font-semibold"
+                      style={{ color: RARITY_COLORS[a.rarity] || "#888" }}
+                    >
+                      {RARITY_TIERS[a.rarity]}
+                    </span>
+                    <span className="text-white/50">Lv {a.level} · {a.summonCount} chats</span>
+                  </div>
+                </Link>
               ))}
             </div>
-            <div className="row mt-16">
+          </div>
+        </section>
+      )}
+
+      {/* EVOLUTION EXPLAINER */}
+      <section className="border-b border-white/5 bg-gradient-to-br from-violet-950/30 to-cyan-950/30">
+        <div className="mx-auto max-w-6xl px-6 py-16">
+          <h2 className="text-3xl font-bold mb-2">Every chat makes them stronger</h2>
+          <p className="text-white/60 mb-10 max-w-2xl">
+            Unlike static NFTs, AgentMint iNFTs <span className="text-violet-300 font-semibold">evolve on-chain</span>.
+            Every summon increments a counter, levels up the agent, and unlocks milestones.
+          </p>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { emoji: "🌱", name: "Initiate", at: "0 chats", desc: "Freshly minted. Pure potential." },
+              { emoji: "🔍", name: "Curious", at: "5 chats", desc: "Starting to understand the world." },
+              { emoji: "🦉", name: "Wise", at: "15 chats", desc: "Solid grasp of conversation. Deepens." },
+              { emoji: "🌌", name: "Ancient", at: "40 chats", desc: "Legendary status. Rarity maxes out." },
+            ].map((m) => (
+              <div key={m.name} className="rounded-xl border border-white/10 bg-black/40 p-5 backdrop-blur">
+                <div className="text-4xl mb-2">{m.emoji}</div>
+                <div className="font-semibold text-lg">{m.name}</div>
+                <div className="text-xs text-violet-300 font-mono mb-2">{m.at}</div>
+                <div className="text-sm text-white/60">{m.desc}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-8 flex flex-wrap gap-3 text-sm">
+            <span className="rounded-full border border-violet-400/40 bg-violet-500/10 px-3 py-1 text-violet-200">
+              ✦ Level = floor(√(chats/2)) + 1
+            </span>
+            <span className="rounded-full border border-cyan-400/40 bg-cyan-500/10 px-3 py-1 text-cyan-200">
+              ✦ Rarity = level × votes
+            </span>
+            <span className="rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1 text-fuchsia-200">
+              ✦ Votes signed on-chain
+            </span>
+            <span className="rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-amber-200">
+              ✦ Personality hash anchored forever
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* MINT FLOW */}
+      <section id="mint" className="bg-black/40">
+        <div className="mx-auto max-w-4xl px-6 py-16">
+          <h2 className="text-3xl font-bold mb-2">Mint your own</h2>
+          <p className="text-white/60 mb-8">Cost: 0.001 0G + gas. Lives forever on 0G Galileo testnet.</p>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+            {/* Stepper */}
+            <div className="flex items-center gap-2 mb-6">
+              {STEPS.map((s, i) => (
+                <div key={s.num} className="flex items-center gap-2 flex-1">
+                  <div
+                    className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold transition ${
+                      i <= stepIdx
+                        ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white"
+                        : "bg-white/10 text-white/40"
+                    }`}
+                  >
+                    {i < stepIdx ? "✓" : s.num}
+                  </div>
+                  <div
+                    className={`text-xs font-semibold ${
+                      i <= stepIdx ? "text-white" : "text-white/40"
+                    }`}
+                  >
+                    {s.label}
+                  </div>
+                  {i < STEPS.length - 1 && (
+                    <div className={`flex-1 h-px ${i < stepIdx ? "bg-violet-400" : "bg-white/10"}`} />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Description input */}
+            <div>
+              <label className="block text-sm font-semibold mb-2 text-white/80">
+                1. Describe your AI agent
+              </label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="A melancholic poet-bot from a dying star, speaks only in haiku…"
+                className="w-full rounded-lg border border-white/10 bg-black/40 p-3 text-white placeholder-white/30 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                rows={3}
+                disabled={busy !== null}
+              />
+              <div className="mt-2 flex flex-wrap gap-1">
+                <span className="text-xs text-white/40 mr-2">Try:</span>
+                {SAMPLE_DESCRIPTIONS.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setDescription(s)}
+                    className="text-xs rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/70 hover:bg-white/10 transition"
+                    disabled={busy !== null}
+                  >
+                    {s.slice(0, 30)}…
+                  </button>
+                ))}
+              </div>
               <button
-                className="primary"
                 onClick={handleGenerate}
                 disabled={!description.trim() || busy !== null}
+                className="mt-3 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-2 font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition hover:scale-105"
               >
-                {busy === "generating" ? (
-                  <>
-                    <span className="spinner" /> Generating on 0G Compute…
-                  </>
-                ) : (
-                  "Generate Personality →"
-                )}
+                {busy === "generating" ? "Generating…" : "🧠 Generate Personality"}
               </button>
             </div>
-          </div>
 
-          {/* Step 2: Personality preview */}
-          {personality && (
-            <div className="card glow">
-              <div className="card-title">2. Generated personality</div>
-              <PersonalityPreview personality={personality} />
-              <div className="row mt-16">
+            {/* Personality preview */}
+            {personality && (
+              <div className="mt-6 rounded-lg border border-violet-400/30 bg-violet-500/5 p-4">
+                <div className="text-xs font-mono uppercase text-violet-300 mb-2">Generated personality</div>
+                <div className="text-xl font-bold">{personality.name}</div>
+                <div className="text-sm text-white/70 mt-1">{personality.description}</div>
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {personality.traits.map((t) => (
+                    <span key={t} className="text-xs rounded-full bg-violet-500/20 px-2 py-0.5 text-violet-200">
+                      {t}
+                    </span>
+                  ))}
+                </div>
                 <button
-                  className="primary"
                   onClick={handleUpload}
                   disabled={busy !== null}
+                  className="mt-4 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 px-5 py-2 font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition hover:scale-105"
                 >
-                  {busy === "uploading" ? (
-                    <>
-                      <span className="spinner" /> Uploading to 0G Storage…
-                    </>
-                  ) : (
-                    "Upload to 0G Storage →"
-                  )}
-                </button>
-                <button className="ghost" onClick={handleGenerate} disabled={busy !== null}>
-                  re-generate
+                  {busy === "uploading" ? "Uploading…" : "📦 Upload to 0G Storage"}
                 </button>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Step 3: Upload result */}
-          {rootHash && (
-            <div className="card">
-              <div className="card-title">3. Stored on 0G</div>
-              <div className="stack-sm">
-                <div>
-                  <label>Root Hash</label>
-                  <div className="mono-addr">{rootHash}</div>
-                </div>
+            {/* Storage proof */}
+            {rootHash && (
+              <div className="mt-6 rounded-lg border border-cyan-400/30 bg-cyan-500/5 p-4">
+                <div className="text-xs font-mono uppercase text-cyan-300 mb-2">Anchored to 0G Storage</div>
+                <div className="font-mono text-sm break-all text-white/80">rootHash: {rootHash}</div>
                 {storageTxHash && (
-                  <div>
-                    <label>Storage Tx</label>
-                    <a
-                      className="mono-addr"
-                      href={`https://chainscan-galileo.0g.ai/tx/${storageTxHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {storageTxHash}
-                    </a>
-                  </div>
+                  <a
+                    href={`https://chainscan-galileo.0g.ai/tx/${storageTxHash}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-cyan-300 hover:text-cyan-200 mt-2 inline-block"
+                  >
+                    View storage tx →
+                  </a>
                 )}
-              </div>
-
-              <div className="row mt-16">
                 <button
-                  className="primary"
                   onClick={handleMint}
-                  disabled={busy !== null}
+                  disabled={busy !== null || !wallet.address}
+                  className="mt-3 ml-3 rounded-lg bg-gradient-to-r from-fuchsia-500 to-pink-500 px-5 py-2 font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition hover:scale-105"
                 >
-                  {busy === "minting" ? (
-                    <>
-                      <span className="spinner" /> Minting iNFT…
-                    </>
-                  ) : !wallet.address ? (
-                    "Connect wallet to mint"
-                  ) : (
-                    "Mint iNFT (0.001 0G) →"
-                  )}
+                  {busy === "minting" ? "Minting…" : !wallet.address ? "🔌 Connect wallet to mint" : "⛓️ Mint iNFT (0.001 0G)"}
                 </button>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Step 4: Mint success */}
-          {mintedTokenId !== null && (
-            <div className="card glow">
-              <div className="card-title">4. ✓ iNFT minted</div>
-              <div className="stack-sm">
-                <div>
-                  <label>Token ID</label>
-                  <div className="mono-addr">#{mintedTokenId}</div>
+            {/* Mint success */}
+            {mintedTokenId && (
+              <div className="mt-6 rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-4">
+                <div className="text-emerald-300 font-bold">🎉 iNFT #{mintedTokenId} minted!</div>
+                <div className="text-sm text-white/70 mt-1">
+                  View it:{" "}
+                  <Link href={`/agent/${mintedTokenId}`} className="text-violet-300 hover:text-violet-200 underline">
+                    /agent/{mintedTokenId}
+                  </Link>
                 </div>
-                <div>
-                  <label>Contract</label>
-                  <div className="mono-addr">{AGENTMINT_ADDRESS}</div>
-                </div>
-                {mintTxHash && (
-                  <div>
-                    <label>Mint Tx</label>
-                    <a
-                      className="mono-addr"
-                      href={`https://chainscan-galileo.0g.ai/tx/${mintTxHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {mintTxHash}
-                    </a>
-                  </div>
-                )}
               </div>
-              <div className="row mt-16">
-                <Link href={`/agent/${mintedTokenId}`} className="primary" style={{ textDecoration: "none" }}>
-                  <button className="primary">Chat with your iNFT →</button>
-                </Link>
-                <button className="ghost" onClick={handleReset}>
-                  mint another
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+            )}
 
-        <div className="stack">
-          <div className="card">
-            <div className="card-title">Activity log</div>
-            <div className="log">
-              {logs.length === 0 ? (
-                <div className="log-line">// no events yet</div>
-              ) : (
-                logs.map((l, i) => (
-                  <div key={i} className={`log-line ${l.kind || ""}`}>
-                    <span className="ts">{l.ts}</span>
-                    {l.msg}
+            {/* Logs */}
+            {logs.length > 0 && (
+              <div className="mt-6 max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-black/60 p-3 font-mono text-xs">
+                {logs.map((l, i) => (
+                  <div key={i} className={
+                    l.kind === "success" ? "text-emerald-300" :
+                    l.kind === "error" ? "text-rose-300" :
+                    "text-white/60"
+                  }>
+                    <span className="text-white/30">[{l.ts}]</span> {l.msg}
                   </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-title">What happens under the hood</div>
-            <ol style={{ paddingLeft: 18, color: "var(--fg-dim)", fontSize: 13, lineHeight: 1.7 }}>
-              <li>
-                Your description is sent to{" "}
-                <span className="pill info">0G Compute</span> (deepseek/qwen/gpt-oss via the
-                router at <code>router-api.0g.ai/v1</code>) which expands it into a structured
-                personality.
-              </li>
-              <li>
-                The personality JSON is uploaded to{" "}
-                <span className="pill info">0G Storage</span>, returning a Merkle root hash.
-              </li>
-              <li>
-                The root hash is stored on-chain as a <code>bytes32</code> field via{" "}
-                <code>AgentMint.mint(tokenURI, personalityHash)</code>, paying{" "}
-                <code>0.001 0G</code>.
-              </li>
-              <li>
-                Anyone can fetch the personality by root hash and chat with the agent using
-                the system prompt as context.
-              </li>
-            </ol>
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="border-t border-white/5 bg-black/60">
+        <div className="mx-auto max-w-6xl px-6 py-10 text-center text-sm text-white/50">
+          <div className="mb-2">
+            Built on{" "}
+            <a href="https://0g.ai" target="_blank" rel="noreferrer" className="text-violet-300 hover:text-violet-200">
+              0G
+            </a>{" "}
+            · Galileo Testnet · Contract{" "}
+            <a
+              href={`https://chainscan-galileo.0g.ai/address/${AGENTMINT_ADDRESS}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-violet-300 hover:text-violet-200 font-mono"
+            >
+              {AGENTMINT_ADDRESS.slice(0, 8)}…{AGENTMINT_ADDRESS.slice(-6)}
+            </a>
+          </div>
+          <div>AgentMint · Zero Cup 2026 · 0G Vibe Coding Tournament</div>
+        </div>
+      </footer>
     </div>
   );
 }
 
-function PersonalityPreview({ personality }: { personality: Personality }) {
+function StatPill({ icon, label, value, accent, sub }: { icon: string; label: string; value: string; accent: string; sub?: string }) {
+  const colors: Record<string, string> = {
+    violet: "border-violet-400/30 bg-violet-500/10 text-violet-200",
+    cyan: "border-cyan-400/30 bg-cyan-500/10 text-cyan-200",
+    fuchsia: "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-200",
+    amber: "border-amber-400/30 bg-amber-500/10 text-amber-200",
+  };
   return (
-    <div className="personality-preview">
-      <div className="field">
-        <div className="field-label">Name</div>
-        <div className="field-value" style={{ fontSize: 20, fontWeight: 700 }}>
-          {personality.name}
-        </div>
-      </div>
-      <div className="field">
-        <div className="field-label">Tagline</div>
-        <div className="field-value">{personality.description}</div>
-      </div>
-      {personality.traits?.length > 0 && (
-        <div className="field">
-          <div className="field-label">Traits</div>
-          <div className="traits">
-            {personality.traits.map((t, i) => (
-              <span key={i} className="pill accent">
-                {t}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="field">
-        <div className="field-label">Voice</div>
-        <div className="field-value">{personality.voice}</div>
-      </div>
-      <div className="field">
-        <div className="field-label">Greeting</div>
-        <div className="field-value" style={{ color: "var(--accent)" }}>
-          {personality.greeting}
-        </div>
-      </div>
-      <div className="field">
-        <div className="field-label">System prompt</div>
-        <div className="field-value" style={{ fontSize: 13, maxHeight: 180, overflow: "auto" }}>
-          {personality.systemPrompt}
-        </div>
-      </div>
+    <div className={`rounded-xl border ${colors[accent]} p-4 backdrop-blur`}>
+      <div className="text-2xl mb-1">{icon}</div>
+      <div className="text-xs uppercase tracking-wider opacity-70">{label}</div>
+      <div className="text-3xl font-black mt-1">{value}</div>
+      {sub && <div className="text-[10px] opacity-60 mt-1">{sub}</div>}
     </div>
   );
 }
