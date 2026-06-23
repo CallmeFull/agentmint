@@ -5,7 +5,7 @@
 > Built for [Zero Cup 2026](https://0g.ai/arena/zero-cup) — 0G's Global Vibe Coding Tournament ($17K prize pool).
 
 [![Demo](https://img.shields.io/badge/▶_Watch_Demo-violet?style=for-the-badge)](https://raw.githubusercontent.com/CallmeFull/agentmint/main/demo/walkthrough.mp4)
-[![Live](https://img.shields.io/badge/🌐_Try_Live-0G_Galileo-blue?style=for-the-badge)](https://tiger-cleaning-clothes-satisfy.trycloudflare.com)
+[![Live](https://img.shields.io/badge/🌐_Try_Live-0G_Galileo-blue?style=for-the-badge)](https://accounting-come-specifically-functionality.trycloudflare.com)
 [![Contract](https://img.shields.io/badge/📜_Contract-0G_Galileo-22c55e?style=for-the-badge)](https://chainscan-galileo.0g.ai/address/0x8cF902DF7f4E353B02886538d30bF5F170a70B1f)
 [![Zero Cup](https://img.shields.io/badge/🏆_Zero_Cup_2026-Entry-fbbf24?style=for-the-badge)](https://0g.ai/arena/zero-cup)
 
